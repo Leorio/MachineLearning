@@ -1,0 +1,119 @@
+---
+title: "MLearning_Assignment"
+output: html_document
+---
+
+## Task description
+
+The goal of this machine learning task is to predict the way in which exercises were performed in the pml dataset that is provided.  The data was obtained by letting 6 participants perform exercises while they wore accelerometers on the belt, forearm, arm, and dumbell. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. We will predict the way in which exercises were carried out, from the other variables that were provided.
+
+
+## Data preparation
+We first load the required packages and data, which consists of a test and training set. 
+
+```{r,warning=FALSE,message=FALSE}
+require("caret")
+require("randomForest")
+require("nnet")
+require("rpart")
+require("rattle")
+require("e1071")
+
+test.validation<-read.csv("pml-testing.csv",na.strings=c("", "NA"),header = TRUE,sep = ",")
+train<-read.csv("pml-training.csv",na.strings=c("", "NA"),header = TRUE,sep=";")
+names(test.validation)[160]="classe"
+test.validation[,160]=as.factor(rep("A",20))
+train=rbind(train,test.validation)
+```
+
+Note that the datasets have 160 variables, which means that there are 159 variables that we can use as a predictor, while the response variable is found in the last column. A lot of the predictor variables however contain (a lot of) missing values and we throw these variables out.
+
+```{r}
+nCol=ncol(train) 
+nRow=nrow(train)
+naVector=rep(0,nCol)
+for(i in 1:nCol){
+  naVector[i]=sum(is.na(train[,i])) 
+  if(naVector[i]>0){
+    naVector[i]<-0
+  }
+  else{
+    naVector[i]<-1
+  }
+}
+
+#Throw out columns that contain NA
+selectionVector<-which(naVector==1)
+trainNonNA<-train[,selectionVector]
+trainNonNA<-trainNonNA[,-1]
+```
+
+Note that we remove the first column of the datasets, this is necessary as this column is increasing in value while the values in the last column, which we want to predict, are ordened. This means that including the first column in the prediction will give an almost perfect prediction by construction. 
+
+Then we split the trainNonNA dataset in a training and a testset. The model is trained on the training set and tested on the testset. The eventual performance is measured on a validation set, which is the test.validation set that we had constructed earlier.
+
+```{r}
+#Splitting data in training and testing set
+set.seed(1001)
+
+validation.NonNA<-tail(trainNonNA,20)
+trainNonNA<-tail(trainNonNA,-20)
+
+inTrain<-createDataPartition(y=trainNonNA[,1],p=0.7,list=FALSE)
+training<-trainNonNA[inTrain,]
+testing<-trainNonNA[-inTrain,]
+```
+
+##Machine Learning approaches
+
+We use a few machine learning approaches to make predictions. 
+
+### Multinomial regression
+We start with the multinomial regression, which is a generalization of the logistic regression in which the response variable can take on multiple values. In a table the classifications are listed and the fraction of correct classifications is calculated. It is important to note that certain columns are deleted, as they lead to errors in the predict.
+
+```{r}
+mnom<-multinom(classe~.,training)
+t.mnom<-table(predict(mnom,testing),testing[,56])
+sum(diag(t.mnom))/sum(t.mnom)
+```
+
+### Classification tree
+The next approach that we use is the classification tree. The classification tree is discussed in the course, so I assume that no further background knowledge is necessary.
+
+```{r}
+rtree<-train(classe~.,method="rpart",training)
+t.rtree<-table(predict(rtree,testing),testing[,56])
+sum(diag(t.rtree))/sum(t.rtree)
+fancyRpartPlot(rtree$finalModel)
+```
+
+### Random forest
+We apply the random forest classifier. 
+
+```{r}
+rforest<-randomForest(classe~.,training)
+t.rforest<-table(predict(rforest,testing),testing[,56])
+sum(diag(t.rforest))/sum(t.rforest)
+plot(rforest)
+```
+
+We see that the random forest performs clearly better than the other methods that we have selected and almost has a perfect prediction on the testset as 99.8% of the classification is correct. However it performs worse than the next classifier on the validation set for some reason.
+
+### Support vector machines
+The last method I want to apply is the support vector machines(svm) classifier, because I obtained good results while playing around with it. Two-value Svm chooses a hyperplane on the testset, that has the largest distance to the nearest training-data points of any class. The intuition behind this is that we can separate points using various hyperplanes, however the 'best' hyperplane should have a error margin (which is the distance until the nearest points) that is as large as possible. In R the support vector machine can understand that more than two categories exist and can also classify accordingly.See below for the results on the testset.
+
+```{r}
+rsvm<-svm(classe~.,training)
+t.svm<-table(predict(rsvm,testing),testing[,56])
+sum(diag(t.svm))/sum(t.svm)
+```
+
+See that we get an accuracy of almost 95%
+
+## Classification on validation set
+
+Next we use the support vector machines on the validation dataset, as this gave the best outcome. It predicted 19 out of 20 points correctly, giving it an accuracy of 95%, similar to the performance on the training set.
+
+```{r}
+predict(rsvm,validation.NonNA)
+```
